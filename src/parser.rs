@@ -1,25 +1,21 @@
-use nom::{IResult,le_i16,le_u16,le_i32,le_u32};
+use nom::{le_i16, le_i32, le_u16, le_u32, IResult};
 
-#[derive(Debug,Clone,PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Header<'a> {
-    magic1:    &'a [u8],
+    magic1: &'a [u8],
     pub file_size: u32,
-    magic2:    &'a [u8],
+    magic2: &'a [u8],
 }
 
 pub fn header(input: &[u8]) -> IResult<&[u8], Header> {
-    map!(input,
+    map!(
+        input,
         alt!(
-          tuple!(
-              tag!(b"RIFF"),
-              le_u32,
-              alt!(tag!(b"AVI ") | tag!(b"AVIX") | tag!(b"AVI\x19") | tag!(b"AMV "))
-          )
-        | tuple!(
-              tag!(b"ON2 "),
-              le_u32,
-              tag!(b"ON2f")
-          )
+            tuple!(
+                tag!(b"RIFF"),
+                le_u32,
+                alt!(tag!(b"AVI ") | tag!(b"AVIX") | tag!(b"AVI\x19") | tag!(b"AMV "))
+            ) | tuple!(tag!(b"ON2 "), le_u32, tag!(b"ON2f"))
         ),
         |(magic1, file_size, magic2)| {
             Header {
@@ -31,9 +27,9 @@ pub fn header(input: &[u8]) -> IResult<&[u8], Header> {
     )
 }
 
-#[derive(Debug,Clone,PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BlockHeader<'a> {
-    tag:  &'a [u8],
+    tag: &'a [u8],
     size: u32,
 }
 
@@ -48,7 +44,7 @@ named!(pub block_header<BlockHeader>,
     )
 );
 
-#[derive(Debug,Clone,PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Block {
     List(usize, List),
     Avih(MainAVIHeader),
@@ -57,7 +53,7 @@ pub enum Block {
     Default,
 }
 
-#[derive(Debug,Clone,PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum List {
     Hdrl,
     Movi(usize),
@@ -65,7 +61,12 @@ pub enum List {
     Unknown(Vec<u8>),
 }
 
-pub fn list(input: &[u8], stream_offset: usize, file_size: u32, list_size: u32) -> IResult<&[u8], List> {
+pub fn list(
+    input: &[u8],
+    stream_offset: usize,
+    file_size: u32,
+    list_size: u32,
+) -> IResult<&[u8], List> {
     switch!(input, take!(4),
         b"INFO" => value!(List::Default) |
         b"ncdt" => value!(List::Default) |
@@ -90,139 +91,145 @@ pub fn list(input: &[u8], stream_offset: usize, file_size: u32, list_size: u32) 
 ///
 /// stream_offset is the offset corresponding to the position of `input` from the beginning of the stream
 pub fn block(input: &[u8], stream_offset: usize, file_size: u32) -> IResult<&[u8], Block> {
-    do_parse!(input,
-        tag:   take!(4) >>
-        size:  le_u32   >>
-        block: switch!(value!(tag),
-          b"LIST" => map!(call!(list, stream_offset, file_size, size), |l| Block::List(size as usize, l)) |
-          b"IDIT" => value!(Block::Unimplemented) |
-          b"dmlh" => value!(Block::Unimplemented) |
-          b"amvh" => value!(Block::Unimplemented) |
-          b"avih" => map!(avih, |h| Block::Avih(h)) |
-          b"strh" => map!(strh, |h| Block::Strh(h)) |
-          b"strf" => value!(Block::Unimplemented) |
-          b"indx" => value!(Block::Unimplemented) |
-          b"vprp" => value!(Block::Unimplemented) |
-          b"strn" => value!(Block::Unimplemented) |
-          _       => value!(Block::Default)
-        )  >>
-        (block)
-
+    do_parse!(
+        input,
+        tag: take!(4)
+            >> size: le_u32
+            >> block:
+                switch!(value!(tag),
+                  b"LIST" => map!(call!(list, stream_offset, file_size, size), |l| Block::List(size as usize, l)) |
+                  b"IDIT" => value!(Block::Unimplemented) |
+                  b"dmlh" => value!(Block::Unimplemented) |
+                  b"amvh" => value!(Block::Unimplemented) |
+                  b"avih" => map!(avih, |h| Block::Avih(h)) |
+                  b"strh" => map!(strh, |h| Block::Strh(h)) |
+                  b"strf" => value!(Block::Unimplemented) |
+                  b"indx" => value!(Block::Unimplemented) |
+                  b"vprp" => value!(Block::Unimplemented) |
+                  b"strn" => value!(Block::Unimplemented) |
+                  _       => value!(Block::Default)
+                )
+            >> (block)
     )
 }
 
-#[derive(Debug,Clone,PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MainAVIHeader {
-    microsec_per_frame:    u32,
-    max_bytes_per_sec:     u32,
-    padding_granularity:   u32,
-    flags:                 u32,
-    total_frames:          u32,
-    initial_frames:        u32,
-    streams:               u32,
+    microsec_per_frame: u32,
+    max_bytes_per_sec: u32,
+    padding_granularity: u32,
+    flags: u32,
+    total_frames: u32,
+    initial_frames: u32,
+    streams: u32,
     suggested_buffer_size: u32,
-    width:                 u32,
-    height:                u32,
+    width: u32,
+    height: u32,
 }
 
 pub fn avih(input: &[u8]) -> IResult<&[u8], MainAVIHeader> {
-    do_parse!(input,
-        microsec_per_frame:    le_u32 >>
-        max_bytes_per_sec:     le_u32 >>
-        padding_granularity:   le_u32 >>
-        flags:                 le_u32 >>
-        total_frames:          le_u32 >>
-        initial_frames:        le_u32 >>
-        streams:               le_u32 >>
-        suggested_buffer_size: le_u32 >>
-        width:                 le_u32 >>
-        height:                le_u32 >>
-                               take!(16) >>
-        (MainAVIHeader {
-            microsec_per_frame,
-            max_bytes_per_sec,
-            padding_granularity,
-            flags,
-            total_frames,
-            initial_frames,
-            streams,
-            suggested_buffer_size,
-            width,
-            height,
-        })
+    do_parse!(
+        input,
+        microsec_per_frame: le_u32
+            >> max_bytes_per_sec: le_u32
+            >> padding_granularity: le_u32
+            >> flags: le_u32
+            >> total_frames: le_u32
+            >> initial_frames: le_u32
+            >> streams: le_u32
+            >> suggested_buffer_size: le_u32
+            >> width: le_u32
+            >> height: le_u32
+            >> take!(16)
+            >> (MainAVIHeader {
+                microsec_per_frame,
+                max_bytes_per_sec,
+                padding_granularity,
+                flags,
+                total_frames,
+                initial_frames,
+                streams,
+                suggested_buffer_size,
+                width,
+                height,
+            })
     )
 }
 
-#[derive(Debug,Clone,PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Rect {
-    left:   i16,
-    top:    i16,
-    right:  i16,
+    left: i16,
+    top: i16,
+    right: i16,
     bottom: i16,
 }
 
-#[derive(Debug,Clone,PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AVIStreamHeader {
-    pub fcc_type:           FccType,
-    fcc_handler:            u32,
-    flags:                  u32,
-    priority:               u16,
-    language:               u16,
-    initial_frames:         u32,
-    scale:                  u32,
-    rate:                   u32,
-    start:                  u32,
-    length:                 u32,
-    suggested_buffer_size:  u32,
-    quality:                u32,
-    sample_size:            u32,
-    frame:                  Rect,
+    pub fcc_type: FccType,
+    fcc_handler: u32,
+    flags: u32,
+    priority: u16,
+    language: u16,
+    initial_frames: u32,
+    scale: u32,
+    rate: u32,
+    start: u32,
+    length: u32,
+    suggested_buffer_size: u32,
+    quality: u32,
+    sample_size: u32,
+    frame: Rect,
 }
 
-#[derive(Debug,Clone,PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum FccType {
-  Video,
-  Audio,
-  Subtitle
+    Video,
+    Audio,
+    Subtitle,
 }
 
 pub fn strh(input: &[u8]) -> IResult<&[u8], AVIStreamHeader> {
-    do_parse!(input,
-        fcc_type:               fcc_type >>
-        fcc_handler:            le_u32   >>
-        flags:                  le_u32   >>
-        priority:               le_u16   >>
-        language:               le_u16   >>
-        initial_frames:         le_u32   >>
-        scale:                  le_u32   >>
-        rate:                   le_u32   >>
-        start:                  le_u32   >>
-        length:                 le_u32   >>
-        suggested_buffer_size:  le_u32   >>
-        quality:                le_u32   >>
-        sample_size:            le_u32   >>
-        left:                   le_i16   >>
-        top:                    le_i16   >>
-        right:                  le_i16   >>
-        bottom:                 le_i16   >>
-        (AVIStreamHeader {
-          fcc_type,
-          fcc_handler,
-          flags,
-          priority,
-          language,
-          initial_frames,
-          scale,
-          rate,
-          start,
-          length,
-          suggested_buffer_size,
-          quality,
-          sample_size,
-          frame: Rect {
-            left, top, right, bottom
-          },
-        })
+    do_parse!(
+        input,
+        fcc_type: fcc_type
+            >> fcc_handler: le_u32
+            >> flags: le_u32
+            >> priority: le_u16
+            >> language: le_u16
+            >> initial_frames: le_u32
+            >> scale: le_u32
+            >> rate: le_u32
+            >> start: le_u32
+            >> length: le_u32
+            >> suggested_buffer_size: le_u32
+            >> quality: le_u32
+            >> sample_size: le_u32
+            >> left: le_i16
+            >> top: le_i16
+            >> right: le_i16
+            >> bottom: le_i16
+            >> (AVIStreamHeader {
+                fcc_type,
+                fcc_handler,
+                flags,
+                priority,
+                language,
+                initial_frames,
+                scale,
+                rate,
+                start,
+                length,
+                suggested_buffer_size,
+                quality,
+                sample_size,
+                frame: Rect {
+                    left,
+                    top,
+                    right,
+                    bottom
+                },
+            })
     )
 }
 
@@ -236,81 +243,96 @@ pub fn fcc_type(input: &[u8]) -> IResult<&[u8], FccType> {
 }
 
 pub fn strf(input: &[u8]) -> IResult<&[u8], BitmapInfoHeader> {
-    do_parse!(input,
-                tag!(b"strf")                        >>
-        size:   verify!(le_u32, |val:u32| val == 40) >>
-        header: bitmap_info_header                   >>
-        (header)
+    do_parse!(
+        input,
+        tag!(b"strf")
+            >> size: verify!(le_u32, |val: u32| val == 40)
+            >> header: bitmap_info_header
+            >> (header)
     )
 }
 
 /// as seen on https://msdn.microsoft.com/en-us/library/windows/desktop/dd183376(v=vs.85).aspx
-#[derive(Debug,Clone,PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BitmapInfoHeader {
-    size:             u32,
-    width:            i32,
-    height:           i32,
-    planes:           u16,
-    bit_count:        u16,
-    compression:      u32,
-    size_image:       u32,
-    xpels_per_meter:  i32,
-    ypels_per_meter:  i32,
-    clr_used:         u32,
-    clr_important:    u32,
+    size: u32,
+    width: i32,
+    height: i32,
+    planes: u16,
+    bit_count: u16,
+    compression: u32,
+    size_image: u32,
+    xpels_per_meter: i32,
+    ypels_per_meter: i32,
+    clr_used: u32,
+    clr_important: u32,
 }
 
 pub fn bitmap_info_header(input: &[u8]) -> IResult<&[u8], BitmapInfoHeader> {
-    do_parse!(input,
-        size:             le_u32 >>
-        width:            le_i32 >>
-        height:           le_i32 >>
-        planes:           le_u16 >>
-        bit_count:        le_u16 >>
-        compression:      le_u32 >>
-        size_image:       le_u32 >>
-        xpels_per_meter:  le_i32 >>
-        ypels_per_meter:  le_i32 >>
-        clr_used:         le_u32 >>
-        clr_important:    le_u32 >>
-        (BitmapInfoHeader {
-          size, width, height, planes, bit_count, compression, size_image, xpels_per_meter,
-          ypels_per_meter, clr_used, clr_important
-        })
+    do_parse!(
+        input,
+        size: le_u32
+            >> width: le_i32
+            >> height: le_i32
+            >> planes: le_u16
+            >> bit_count: le_u16
+            >> compression: le_u32
+            >> size_image: le_u32
+            >> xpels_per_meter: le_i32
+            >> ypels_per_meter: le_i32
+            >> clr_used: le_u32
+            >> clr_important: le_u32
+            >> (BitmapInfoHeader {
+                size,
+                width,
+                height,
+                planes,
+                bit_count,
+                compression,
+                size_image,
+                xpels_per_meter,
+                ypels_per_meter,
+                clr_used,
+                clr_important
+            })
     )
 }
 #[cfg(test)]
 mod tests {
-    use nom::{HexDisplay,IResult};
     use super::*;
+    use nom::HexDisplay;
 
-    const drop   : &'static [u8] = include_bytes!("../assets/drop.avi");
-    const verona : &'static [u8] = include_bytes!("../assets/verona60avi56k.avi");
+    const drop: &'static [u8] = include_bytes!("../assets/drop.avi");
+    const verona: &'static [u8] = include_bytes!("../assets/verona60avi56k.avi");
 
     #[test]
     fn parse_header() {
         let data = header(&drop[..12]);
         println!("data: {:?}", data);
-        assert_eq!(data,
-            IResult::Done(
+        assert_eq!(
+            data,
+            Ok((
                 &b""[..],
                 Header {
-                    magic1:    b"RIFF",
+                    magic1: b"RIFF",
                     file_size: 675628,
-                    magic2:    b"AVI ",
-            })
+                    magic2: b"AVI ",
+                }
+            ))
         );
 
         let data = header(&verona[..12]);
         println!("data: {:?}", data);
-        assert_eq!(data,
-            IResult::Done(
+        assert_eq!(
+            data,
+            Ok((
                 &b""[..],
                 Header {
-                    magic1:    b"RIFF",
+                    magic1: b"RIFF",
                     file_size: 1926660,
-                    magic2:    b"AVI ",
-            })
+                    magic2: b"AVI ",
+                }
+            ))
         );
     }
 
@@ -319,23 +341,27 @@ mod tests {
         println!("block:\n{}", &drop[12..200].to_hex(16));
         let data = block_header(&drop[12..20]);
         println!("data: {:?}", data);
-        assert_eq!(data,
-            IResult::Done(
+        assert_eq!(
+            data,
+            Ok((
                 &b""[..],
                 BlockHeader {
                     tag: b"LIST",
                     size: 192,
-            })
+                }
+            ))
         );
         let data = block_header(&verona[12..20]);
         println!("data: {:?}", data);
-        assert_eq!(data,
-            IResult::Done(
+        assert_eq!(
+            data,
+            Ok((
                 &b""[..],
                 BlockHeader {
                     tag: b"LIST",
                     size: 370,
-            })
+                }
+            ))
         );
     }
 
@@ -344,20 +370,11 @@ mod tests {
         println!("block:\n{}", &drop[12..24].to_hex(16));
         let data = block(&drop[12..24], 12, 675628);
         println!("data: {:?}", data);
-        assert_eq!(data,
-            IResult::Done(
-                &b""[..],
-                Block::List(192, List::Unknown(vec!('h' as u8, 'd' as u8, 'r' as u8, 'l' as u8)))
-            )
-        );
+        assert_eq!(data, Ok((&b""[..], Block::List(192, List::Hdrl))));
+        println!("block:\n{}", &verona[12..24].to_hex(16));
         let data = block(&verona[12..24], 12, 1926660);
         println!("data: {:?}", data);
-        assert_eq!(data,
-            IResult::Done(
-                &b""[..],
-                Block::List(370, List::Unknown(vec!('h' as u8, 'd' as u8, 'r' as u8, 'l' as u8)))
-            )
-        );
+        assert_eq!(data, Ok((&b""[..], Block::List(370, List::Hdrl))));
     }
 
     #[test]
@@ -365,19 +382,13 @@ mod tests {
         println!("block:\n{}", &drop[112..120].to_hex(16));
         let data = block(&drop[112..120], 112, 675628);
         println!("data: {:?}", data);
-        assert_eq!(data,
-            IResult::Done(
-                &b""[..],
-                Block::Default
-            )
-        );
+        assert_eq!(data, Ok((&b""[..], Block::Default)));
+        println!("block:\n{}", &verona[382..398].to_hex(16));
         let data = block(&verona[382..398], 382, 1926660);
         println!("data: {:?}", data);
-        assert_eq!(data,
-            IResult::Done(
-                &b""[..],
-                Block::Default
-            )
+        assert_eq!(
+            data,
+            Ok((&vec!(74, 85, 78, 75, 102, 6, 0, 0)[..], Block::Default))
         );
     }
 }
